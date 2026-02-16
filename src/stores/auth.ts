@@ -141,6 +141,8 @@ export const useAuthStore = defineStore('auth', () => {
 
       // NIP-46 is a skeleton in marmot-ts, so we store connection info
       // In production, this would use a full NIP-46 implementation
+      // TODO: Create a proper Nip46Signer when marmot-ts adds NIP-46 support.
+      // Without a signer, Welcome events and gift wrapping will silently fail.
       pubkey.value = remotePubkey
       method.value = 'nip46'
       connected.value = true

@@ -26,6 +26,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@noble/curves": "^2.0.1",
     "@vueuse/core": "^12.5.0",
     "immer": "^10.1.1",
     "localforage": "^1.10.0",

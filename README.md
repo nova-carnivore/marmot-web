@@ -10,43 +10,58 @@ Built as a **reference implementation** showcasing the [marmot-ts](https://githu
 
 > **⚠️ Status: Work In Progress — Not Production Ready**
 >
-> This client demonstrates Marmot Protocol concepts but **cannot fully interoperate with [MDK](https://github.com/marmot-protocol/mdk) / [marmot-cli](https://github.com/marmot-protocol/mdk) (the Rust reference implementation).**
->
-> **What works:**
+> **What works (verified 2026-02-16):**
+> - ✅ **marmot-web ↔ marmot-web:** Fully working bidirectional chat
 > - ✅ Login via NIP-07 or NIP-46
 > - ✅ Contact loading, KeyPackage publishing, relay management
-> - ✅ Receiving Welcome events from MDK → joining MLS groups → parsing v2 group data
-> - ✅ All browser crypto (Ed25519, X25519, SHA-256, HKDF — patched via Vite plugin for WebCrypto)
+> - ✅ Group creation, member management, encrypted messaging
 > - ✅ NIP-59 gift wrapping for Welcome events
 > - ✅ Encrypted media upload (MIP-04, Blossom)
+> - ✅ All browser crypto (Ed25519, X25519, SHA-256, HKDF — WebCrypto native)
 >
 > **What doesn't work:**
-> - ❌ **Creating groups that MDK users can join** — MDK rejects KeyPackages from this client with `"The capabilities of the add proposal are insufficient for this group"`
-> - ❌ **Sending messages that MDK can decrypt** — Welcome encoding incompatibility prevents full bidirectional messaging
-> - ❌ **Receiving and decrypting kind:445 group messages** — subscription and decryption flow not yet implemented
+> - ❌ **Creating groups that MDK users can join** — MDK rejects KeyPackages from this client
+> - ❌ **Sending messages that MDK can decrypt** — Welcome encoding incompatibility
 >
 > **Root cause:**
-> The MLS layer ([ts-mls](https://github.com/LukaJCB/ts-mls)) has encoding incompatibilities with [OpenMLS](https://github.com/openmls/openmls) (used by MDK). In browser contexts, ts-mls drops the `0xf2ee` (marmot_group_data) extension from KeyPackage capabilities during serialization — despite the source code correctly specifying it. This is a ts-mls bug, not a marmot-web or marmot-ts issue. See [marmot-ts README](https://github.com/nova-carnivore/marmot-ts#readme) for full details.
->
-> **Workaround:** Groups must be created from the MDK/marmot-cli side. marmot-web can join these groups and (once kind:445 subscription is implemented) participate in conversations.
+> The MLS layer ([ts-mls](https://github.com/LukaJCB/ts-mls)) has encoding incompatibilities with [OpenMLS](https://github.com/openmls/openmls) (used by MDK). See [marmot-ts README](https://github.com/nova-carnivore/marmot-ts#readme) for full details.
 
 ## ✨ Features
 
+- ✅ **Add Contact** — Add contacts by npub/hex, publishes follow event (kind:3)
+- ✅ **Leave Group** — Exit conversations with local cleanup
+- ✅ **Add Members** — Invite contacts to existing groups (with KeyPackage validation)
+- ✅ **End-to-end encrypted messaging** — MLS + NIP-59
+- ✅ **Real-time message sync** — WebSocket relay connections, live delivery
+- ✅ **KeyPackage publishing** — Create, view, delete KeyPackages (kind:443)
+- ✅ **Profile management** — View and update profile metadata (kind:0)
+- ✅ **Contact discovery** — Load following list with profiles & KeyPackage status
 - 🔐 **NIP-07 + NIP-46 Authentication** — Browser extension or remote signer
-- 👥 **Contact Management** — Load following list with profiles & KeyPackage status
-- 💬 **Real-time Messaging** — WebSocket relay connections, live message delivery
-- 🔑 **KeyPackage Management** — Publish, view, delete KeyPackages (kind:443)
 - 📎 **MIP-04 Encrypted Media** — ChaCha20-Poly1305 file encryption with imeta tags
 - 🏗️ **Group Management** — Create groups, add/remove members, admin controls
 - 🔍 **Search** — Search contacts and message history
 - 🌙 **Dark Mode** — DaisyUI theme support
 - 📱 **Responsive** — Desktop-first with mobile support
 
+## Recent Updates (2026-02-16)
+
+- **Add Contact Button:** New dialog in Contacts view for adding contacts by npub/hex. Automatically publishes follow event and fetches profile + KeyPackages.
+- **Leave Group:** Confirmation dialog + local cleanup (conversation removed, MLS state cleared).
+- **Add Members:** Dialog for selecting contacts to add to existing groups. Shows KeyPackage availability with 🔐 badges.
+- **Duplicate messages fixed:** Messages no longer appear twice (optimistic + confirmed merge working).
+- **0xf2ee Extension Fix:** Group creation now correctly includes Marmot Group Data extension.
+- **Welcome subscription window:** Widened to 48h for timestamp randomization compatibility.
+
+## Known Limitations
+
+- **MDK/marmot-cli interop:** Messages sent to MDK-based clients are not received due to upstream Welcome encoding issue. See [marmot-cli#8](https://github.com/kai-familiar/marmot-cli/issues/8).
+- **marmot-web ↔ marmot-web:** Fully working ✅
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Node.js 20+ 
+- Node.js 20+
 - [marmot-ts](https://github.com/nova-carnivore/marmot-ts) cloned at `../marmot-ts`
 
 ### Setup
@@ -84,6 +99,7 @@ marmot-web/
 │   │   │   ├── MessageComposer.vue    # Text input + file attachment
 │   │   │   └── MediaPreview.vue       # Image/video/file previews
 │   │   ├── contacts/
+│   │   │   ├── AddContactDialog.vue   # Add contact by npub/hex
 │   │   │   ├── ContactList.vue        # Following list with search
 │   │   │   ├── ContactCard.vue        # Contact with KeyPackage status
 │   │   │   └── ContactSearch.vue      # Global search
@@ -93,6 +109,7 @@ marmot-web/
 │   ├── composables/
 │   │   ├── useNostr.ts       # Relay connections, subscriptions
 │   │   ├── useMarmot.ts      # Group creation, messaging
+│   │   ├── useGroupManagement.ts # Leave group, add members
 │   │   ├── useKeyPackages.ts # KeyPackage CRUD
 │   │   ├── useProfile.ts     # Profile loading
 │   │   └── useMedia.ts       # MIP-04 media encryption
@@ -137,7 +154,7 @@ The client integrates all MIP implementations from marmot-ts:
 // MIP-00: KeyPackage management
 import { createKeyPackageEvent, parseKeyPackageEvent } from 'marmot-ts/mip00'
 
-// MIP-01: Group creation  
+// MIP-01: Group creation
 import { createGroupData, getNostrGroupIdHex } from 'marmot-ts/mip01'
 
 // MIP-02: Welcome events
@@ -152,6 +169,18 @@ import {
 
 // MIP-04: Encrypted media
 import { encryptMedia, decryptMedia, buildImetaTag } from 'marmot-ts/mip04'
+
+// Social: Follow list management
+import { publishFollowList } from 'marmot-ts/social'
+
+// KeyPackage lifecycle
+import { KeyPackageManager } from 'marmot-ts/keypackage-manager'
+
+// Group management
+import { addGroupMembers } from 'marmot-ts/group-management'
+
+// Welcome flow
+import { createAndWrapWelcomes } from 'marmot-ts/welcome'
 ```
 
 ### Message Flow

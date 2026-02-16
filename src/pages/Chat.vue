@@ -10,8 +10,10 @@ import ConversationList from '@/components/chat/ConversationList.vue'
 import MessageThread from '@/components/chat/MessageThread.vue'
 import MessageComposer from '@/components/chat/MessageComposer.vue'
 import ContactKeyPackageSelector from '@/components/chat/ContactKeyPackageSelector.vue'
+import AddMembersDialog from '@/components/chat/AddMembersDialog.vue'
 import ContactList from '@/components/contacts/ContactList.vue'
 import ContactSearch from '@/components/contacts/ContactSearch.vue'
+import AddContactDialog from '@/components/contacts/AddContactDialog.vue'
 import Avatar from '@/components/common/Avatar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useConversationsStore } from '@/stores/conversations'
@@ -21,6 +23,7 @@ import { useKeyPackagesStore } from '@/stores/keyPackages'
 import { useNostr } from '@/composables/useNostr'
 import { useMarmot } from '@/composables/useMarmot'
 import { useKeyPackages } from '@/composables/useKeyPackages'
+import { useGroupManagement } from '@/composables/useGroupManagement'
 import { getDisplayName } from '@/utils/nostr'
 import { DEFAULT_RELAYS } from '@/types'
 import type { Conversation } from '@/types'
@@ -42,10 +45,13 @@ const {
 } = useNostr()
 const { createGroup, sendMessage, handleWelcome } = useMarmot()
 const { checkKeyPackages } = useKeyPackages()
+const { leaveGroup } = useGroupManagement()
 
 // UI state
 const sidebarView = ref<'chats' | 'contacts' | 'search' | 'newGroup'>('chats')
 const showGroupModal = ref(false)
+const showAddMembersDialog = ref(false)
+const showAddContactDialog = ref(false)
 const newGroupName = ref('')
 const newGroupDescription = ref('')
 const selectedMembers = ref<string[]>([])
@@ -237,6 +243,40 @@ const membersWithoutKeyPackages = computed(() => {
   })
 })
 
+/** Handle leaving the active conversation */
+async function handleLeaveGroup(): Promise<void> {
+  if (!activeConversation.value) return
+
+  const convName = getConversationName(activeConversation.value)
+  const confirmed = confirm(`Leave "${convName}"?\n\nThis will remove the conversation from your device. Other members will not be notified.`)
+  if (!confirmed) return
+
+  try {
+    await leaveGroup(activeConversation.value.id)
+    sidebarView.value = 'chats'
+  } catch (err) {
+    console.error('Failed to leave group:', err)
+    alert('Failed to leave group: ' + (err instanceof Error ? err.message : 'Unknown error'))
+  }
+}
+
+/** Open Add Members dialog */
+function openAddMembers(): void {
+  if (!activeConversation.value) return
+  showAddMembersDialog.value = true
+}
+
+/** Open Add Contact dialog */
+function openAddContact(): void {
+  showAddContactDialog.value = true
+}
+
+/** Handle contact added callback */
+function handleContactAdded(pubkey: string): void {
+  console.log('[Chat] Contact added:', pubkey.slice(0, 12))
+  // If we're on contacts view, it will auto-update via reactivity
+}
+
 function goBack(): void {
   mobileShowChat.value = false
   conversationsStore.setActive(null)
@@ -255,6 +295,13 @@ function logout(): void {
   authStore.disconnect()
   router.push('/login')
 }
+
+// Expose key functions for testing (CDP / interop test suite)
+defineExpose({
+  handleStartChat,
+  handleSendMessage,
+  handleCreateGroup,
+})
 </script>
 
 <template>
@@ -343,7 +390,16 @@ function logout(): void {
         <ConversationList v-if="sidebarView === 'chats'" />
 
         <!-- Contacts view -->
-        <ContactList v-else-if="sidebarView === 'contacts'" @start-chat="handleStartChat" />
+        <div v-else-if="sidebarView === 'contacts'" class="flex flex-col h-full">
+          <div class="p-2 border-b border-base-200">
+            <button class="btn btn-primary btn-sm w-full gap-2" @click="openAddContact">
+              ➕ Add Contact
+            </button>
+          </div>
+          <div class="flex-1 overflow-hidden">
+            <ContactList @start-chat="handleStartChat" />
+          </div>
+        </div>
 
         <!-- Search view -->
         <div v-else-if="sidebarView === 'search'" class="p-3">
@@ -455,11 +511,11 @@ function logout(): void {
               <li>
                 <a>👥 Members ({{ activeConversation.members.length }})</a>
               </li>
-              <li v-if="activeConversation.isAdmin">
-                <a>➕ Add Member</a>
+              <li>
+                <a @click="openAddMembers">➕ Add Members</a>
               </li>
               <li class="text-error">
-                <a>🚪 Leave Group</a>
+                <a @click="handleLeaveGroup">🚪 Leave Group</a>
               </li>
             </ul>
           </div>
@@ -485,5 +541,21 @@ function logout(): void {
         </p>
       </div>
     </div>
+
+    <!-- Add Contact Dialog -->
+    <AddContactDialog
+      :show="showAddContactDialog"
+      @close="showAddContactDialog = false"
+      @added="handleContactAdded"
+    />
+
+    <!-- Add Members Dialog -->
+    <AddMembersDialog
+      v-if="activeConversation"
+      :show="showAddMembersDialog"
+      :conversation="activeConversation"
+      @close="showAddMembersDialog = false"
+      @members-added="(pubkeys) => console.log('[Chat] Members added:', pubkeys)"
+    />
   </div>
 </template>

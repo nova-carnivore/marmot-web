@@ -36,11 +36,62 @@ export const useMessagesStore = defineStore('messages', () => {
 
   /**
    * Add a message to a conversation.
+   *
+   * Deduplicates by:
+   * 1. Exact event ID match (relay echoes after updateMessage sets the real ID)
+   * 2. Optimistic message match (same sender + content + close timestamp)
+   *    — merges the confirmed message into the optimistic entry to avoid
+   *    showing both the optimistic send and the relay echo.
+   * 3. Content-based duplicate guard (same sender + identical content + ≤5s)
+   *    — catches edge cases where multiple relay deliveries or reactivity
+   *    timing cause both optimistic and confirmed messages to coexist.
    */
   function addMessage(msg: ChatMessage): void {
     const existing = messages.value[msg.conversationId] ?? []
-    // Don't add duplicates
-    if (existing.some((m) => m.id === msg.id)) return
+
+    // Check 1: exact ID match
+    if (existing.some((m) => m.id === msg.id)) {
+      console.debug(`[Messages] Skipped duplicate (exact ID: ${msg.id.slice(0, 8)}...)`)
+      return
+    }
+
+    // Check 2: merge with optimistic message (same sender + content within 60s)
+    const optimisticIdx = existing.findIndex(
+      (m) =>
+        (m.status === 'sending' || m.status === 'sent') &&
+        m.senderPubkey === msg.senderPubkey &&
+        m.content === msg.content &&
+        Math.abs(m.createdAt - msg.createdAt) <= 60,
+    )
+    if (optimisticIdx !== -1) {
+      // Replace the optimistic message with the confirmed one
+      const updated = [...existing]
+      updated[optimisticIdx] = { ...msg, status: 'sent' }
+      messages.value = {
+        ...messages.value,
+        [msg.conversationId]: updated,
+      }
+      console.log(
+        `[Messages] Merged relay echo with optimistic message (${msg.id.slice(0, 8)}...)`,
+      )
+      return
+    }
+
+    // Check 3: strict content-based duplicate guard
+    // Prevents duplicates from multi-relay delivery or updateMessage race conditions.
+    // Uses a tight 5-second window to avoid false positives across real messages.
+    const isDuplicate = existing.some(
+      (m) =>
+        m.senderPubkey === msg.senderPubkey &&
+        m.content === msg.content &&
+        Math.abs(m.createdAt - msg.createdAt) <= 5,
+    )
+    if (isDuplicate) {
+      console.log(
+        `[Messages] Skipped content-duplicate (${msg.id.slice(0, 8)}..., sender: ${msg.senderPubkey.slice(0, 8)}...)`,
+      )
+      return
+    }
 
     messages.value = {
       ...messages.value,
