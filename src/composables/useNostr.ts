@@ -354,7 +354,7 @@ export function useNostr() {
     const pubkey = authStore.pubkey
     if (!pubkey) throw new Error('Not authenticated')
 
-    const since = Math.floor(Date.now() / 1000) - 86400 // Last 24 hours
+    const since = Math.floor(Date.now() / 1000) - 172800 // Last 48 hours (NIP-59 randomizes timestamps up to 48h in past)
     return subscribeToEvents([{ kinds: [1059], '#p': [pubkey], since }], onEvent)
   }
 

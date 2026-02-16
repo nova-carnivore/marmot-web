@@ -38,8 +38,10 @@ import {
   parseKeyPackageBytes,
   encodeWelcome,
   decodeWelcome,
+  makeCustomExtension,
   type CiphersuiteName,
 } from 'marmot-ts/mls'
+import { serializeMarmotGroupData } from 'marmot-ts/mip01'
 import { loadKeyPackageData } from '@/services/mlsStorage'
 
 export function useMarmot() {
@@ -73,10 +75,22 @@ export function useMarmot() {
     const nostrGroupId = getNostrGroupIdHex(groupData)
     const groupIdBytes = hexToBytes(nostrGroupId)
 
-    // Create real MLS group using ts-mls
-    const mlsResult = await createMlsGroup(groupIdBytes, pubkey, options.ciphersuiteName)
+    // Serialize Marmot Group Data as a custom MLS extension (0xf2ee)
+    const groupDataBytes = serializeMarmotGroupData(groupData)
+    const marmotExtension = makeCustomExtension({
+      extensionType: 0xf2ee,
+      extensionData: groupDataBytes,
+    })
 
-    console.log('[Marmot] MLS group created with real RFC 9420 state')
+    // Create real MLS group using ts-mls, with Marmot group data extension
+    const mlsResult = await createMlsGroup(
+      groupIdBytes,
+      pubkey,
+      options.ciphersuiteName,
+      [marmotExtension],
+    )
+
+    console.log('[Marmot] MLS group created with real RFC 9420 state + 0xf2ee extension')
 
     // Add members: fetch their KeyPackages, parse, and add to MLS group
     let finalState = mlsResult.state
@@ -222,6 +236,11 @@ export function useMarmot() {
             await publishEvent(giftWrap as unknown as import('nostr-tools').Event)
             console.log(
               `[Marmot] Welcome gift-wrapped and sent to ${memberPubkey.slice(0, 8)}... (kp: ${keyPackageEventId.slice(0, 8)}...)`,
+            )
+          } else {
+            console.error(
+              `[Marmot] ⚠️ No signer available — cannot gift-wrap Welcome for ${memberPubkey.slice(0, 8)}...! ` +
+              `NIP-46 users need a proper signer implementation.`,
             )
           }
         } catch (err) {
