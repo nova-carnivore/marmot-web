@@ -459,11 +459,14 @@ export function useMarmot() {
 
       for (const ext of extensions) {
         const extType = ext.extensionType
+        // In ts-mls v2, extensionData can be Uint8Array | RequiredCapabilities | ExternalSender
+        // Custom extensions (like 0xf2ee) have Uint8Array extensionData
         const extData = ext.extensionData
+        const extLen = extData instanceof Uint8Array ? extData.length : 0
         console.log(
-          `[Marmot] Extension 0x${(typeof extType === 'number' ? extType : 0).toString(16)}: ${extData?.length ?? 0} bytes`,
+          `[Marmot] Extension 0x${(typeof extType === 'number' ? extType : 0).toString(16)}: ${extLen} bytes`,
         )
-        if (extType === 0xf2ee && extData) {
+        if (extType === 0xf2ee && extData instanceof Uint8Array) {
           try {
             const { deserializeMarmotGroupData } = await import('marmot-ts/mip01')
             groupData = deserializeMarmotGroupData(extData)
@@ -488,18 +491,22 @@ export function useMarmot() {
       const nostrGroupId = getNostrGroupIdHex(groupData)
 
       // Extract members from MLS ratchet tree (all leaf nodes)
+      // In ts-mls v2, nodeType and credentialType are numeric:
+      // nodeTypes.leaf = 1, defaultCredentialTypes.basic = 1
       const members: string[] = []
       if (joinResult.state.ratchetTree) {
         for (const node of joinResult.state.ratchetTree) {
           if (
             node &&
-            node.nodeType === 'leaf' &&
+            node.nodeType === 1 && // nodeTypes.leaf
             node.leaf?.credential &&
-            node.leaf.credential.credentialType === 'basic'
+            node.leaf.credential.credentialType === 1 // defaultCredentialTypes.basic
           ) {
             try {
               // Extract pubkey from credential identity (32 bytes)
-              const identity = node.leaf.credential.identity
+              // In ts-mls v2, basic credentials have 'identity', custom have 'data'
+              const cred = node.leaf.credential as { identity?: Uint8Array }
+              const identity = cred.identity
               if (identity && identity.length === 32) {
                 const { bytesToHex } = await import('marmot-ts')
                 const memberPubkey = bytesToHex(identity)
